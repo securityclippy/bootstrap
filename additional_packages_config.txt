@@ -1,0 +1,58 @@
+# Additional system packages to install via system package manager
+# One package per line
+# Lines starting with # are comments and will be ignored
+# Empty lines are also ignored
+# These will be installed using apt/yum/dnf/pacman depending on your distro
+
+# Development dependencies
+autoconf
+bison
+build-essential
+libssl-dev
+libyaml-dev
+libreadline6-dev
+zlib1g-dev
+libncurses5-dev
+libffi-dev
+libgdbm-dev
+libsqlite3-dev
+libgmp-dev
+
+# Network tools
+net-tools
+dnsutils
+telnet
+nmap
+tcpdump
+
+# System monitoring
+iotop
+iftop
+nethogs
+sysstat
+
+# Archive tools
+unzip
+zip
+p7zip-full
+rar
+unrar
+
+# Media tools
+ffmpeg
+imagemagick
+
+# Database clients
+sqlite3
+postgresql-client
+
+# Documentation
+man-db
+manpages-dev
+
+# Optional: GUI applications (comment out if not needed)
+# firefox
+# code
+# gimp
+# vlc
+# thunderbird
