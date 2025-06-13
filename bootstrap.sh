@@ -502,7 +502,6 @@ main() {
     install_homebrew
     install_system_tools
     install_additional_packages
-    create_dev_directories
     configure_shell
     validate_installation
     
