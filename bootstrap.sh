@@ -176,9 +176,9 @@ download_config_files() {
     
     # List of config files to download
     local config_files=(
-        ".tool-versions"
-        "brew-packages.txt"
-        "additional-packages.txt"
+        "asdf_languages_config.txt"
+        "brew_packages_config.txt"
+        "additional_packages_config.txt"
     )
     
     for config_file in "${config_files[@]}"; do
@@ -209,18 +209,21 @@ install_asdf_tools() {
     export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"
     . "$HOME/.asdf/asdf.sh"
     
-    local config_file="$HOME/.bootstrap-config/.tool-versions"
+    local config_file="$HOME/.bootstrap-config/asdf_languages_config.txt"
     local tool_versions_file=""
     
-    # Use downloaded .tool-versions or fall back to current directory or defaults
+    # Use downloaded config or fall back to local or defaults
     if [[ -f "$config_file" ]]; then
         tool_versions_file="$config_file"
-        log_info "Using .tool-versions from config"
+        log_info "Using asdf config from downloaded file"
+    elif [[ -f "config/asdf_languages_config.txt" ]]; then
+        tool_versions_file="config/asdf_languages_config.txt"
+        log_info "Using asdf config from local directory"
     elif [[ -f ".tool-versions" ]]; then
         tool_versions_file=".tool-versions"
         log_info "Using .tool-versions from current directory"
     else
-        log_warning "No .tool-versions found, creating default configuration"
+        log_warning "No asdf config found, creating default configuration"
         cat > "$HOME/.tool-versions" << 'EOF'
 # Development runtimes
 nodejs 22.11.0
@@ -242,14 +245,21 @@ EOF
         tool_versions_file="$HOME/.tool-versions"
     fi
     
-    # Parse .tool-versions and install plugins
+    # Parse config file and install plugins
     local tools=()
     while IFS= read -r line; do
         # Skip empty lines and comments
         [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
         
-        # Extract tool name (first word)
-        local tool=$(echo "$line" | awk '{print $1}')
+        # Extract tool name - handle both formats: "tool:version" and "tool version"
+        local tool
+        if [[ "$line" =~ : ]]; then
+            # Format: language:version
+            tool=$(echo "$line" | cut -d: -f1)
+        else
+            # Format: language version
+            tool=$(echo "$line" | awk '{print $1}')
+        fi
         [[ -n "$tool" ]] && tools+=("$tool")
     done < "$tool_versions_file"
     
@@ -267,14 +277,41 @@ EOF
         fi
     done
     
-    # Install tools from .tool-versions
+    # Convert config to .tool-versions format if needed and install tools
     if [[ -f "$tool_versions_file" ]]; then
         log_info "Installing tools from $tool_versions_file..."
-        cd "$(dirname "$tool_versions_file")"
-        if asdf install; then
-            log_success "All tools installed successfully"
+        
+        # If using the language:version format, convert to .tool-versions format
+        if [[ "$tool_versions_file" == *"asdf_languages_config.txt" ]]; then
+            local temp_tool_versions="/tmp/.tool-versions"
+            while IFS= read -r line; do
+                # Skip empty lines and comments
+                [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+                
+                # Convert language:version to language version
+                if [[ "$line" =~ : ]]; then
+                    echo "$line" | sed 's/:/ /' >> "$temp_tool_versions"
+                else
+                    echo "$line" >> "$temp_tool_versions"
+                fi
+            done < "$tool_versions_file"
+            
+            # Install from converted file
+            cd /tmp
+            if asdf install; then
+                log_success "All tools installed successfully"
+            else
+                log_warning "Some tools failed to install, continuing..."
+            fi
+            rm -f "$temp_tool_versions"
         else
-            log_warning "Some tools failed to install, continuing..."
+            # Use file as-is
+            cd "$(dirname "$tool_versions_file")"
+            if asdf install; then
+                log_success "All tools installed successfully"
+            else
+                log_warning "Some tools failed to install, continuing..."
+            fi
         fi
     fi
     
@@ -332,7 +369,7 @@ install_system_tools() {
         return 1
     fi
     
-    local config_file="$HOME/.bootstrap-config/brew-packages.txt"
+    local config_file="$HOME/.bootstrap-config/brew_packages_config.txt"
     local packages=()
     
     # Read packages from file or use defaults
@@ -343,6 +380,13 @@ install_system_tools() {
             [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
             packages+=("$line")
         done < "$config_file"
+    elif [[ -f "config/brew_packages_config.txt" ]]; then
+        log_info "Reading Homebrew packages from local config"
+        while IFS= read -r line; do
+            # Skip empty lines and comments
+            [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+            packages+=("$line")
+        done < "config/brew_packages_config.txt"
     else
         log_warning "No brew-packages.txt found, using default system tools"
         packages=(
@@ -378,10 +422,15 @@ install_system_tools() {
 install_additional_packages() {
     log_info "Installing additional system packages..."
     
-    local config_file="$HOME/.bootstrap-config/additional-packages.txt"
+    local config_file="$HOME/.bootstrap-config/additional_packages_config.txt"
     
-    if [[ ! -f "$config_file" ]]; then
-        log_info "No additional-packages.txt found, skipping additional packages"
+    if [[ -f "$config_file" ]]; then
+        log_info "Using downloaded additional packages config"
+    elif [[ -f "config/additional_packages_config.txt" ]]; then
+        config_file="config/additional_packages_config.txt"
+        log_info "Using local additional packages config"
+    else
+        log_info "No additional packages config found, skipping additional packages"
         return
     fi
     
