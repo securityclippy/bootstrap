@@ -196,39 +196,7 @@ download_config_files() {
 
 # Install asdf
 install_asdf() {
-    if [[ -d "$HOME/.asdf" ]]; then
-        log_info "asdf already installed, updating..."
-        cd "$HOME/.asdf"
-        git pull origin master
-        log_success "asdf updated"
-        return
-    fi
-    
-    log_info "Installing asdf..."
-    
-    # Clone asdf repository
-    git clone https://github.com/asdf-vm/asdf.git ~/.asdf --branch v0.16.0
-    
-    # Add to shell profile
-    SHELL_PROFILE=""
-    if [[ -n "$ZSH_VERSION" ]]; then
-        SHELL_PROFILE="$HOME/.zshrc"
-    elif [[ -n "$BASH_VERSION" ]]; then
-        SHELL_PROFILE="$HOME/.bashrc"
-    fi
-    
-    if [[ -n "$SHELL_PROFILE" && -f "$SHELL_PROFILE" ]]; then
-        if ! grep -q "asdf.sh" "$SHELL_PROFILE"; then
-            echo 'export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"' >> "$SHELL_PROFILE"
-            echo '. "$HOME/.asdf/asdf.sh"' >> "$SHELL_PROFILE"
-            echo '. "$HOME/.asdf/completions/asdf.bash"' >> "$SHELL_PROFILE"
-            log_info "Added asdf to $SHELL_PROFILE"
-        fi
-    fi
-    
-    # Source asdf for current session
-    export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"
-    . "$HOME/.asdf/asdf.sh"
+    brew install asdf
     
     log_success "asdf installed successfully"
 }
