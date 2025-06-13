@@ -415,24 +415,65 @@ install_additional_packages() {
 }
 
 
-# Create common development directories
-
-
-# Configure shell for optimal asdf performance
-configure_shell() {
-    log_info "Configuring shell for optimal asdf performance..."
+# Install oh-my-zsh
+install_ohmyzsh() {
+    log_info "Installing oh-my-zsh..."
     
-    SHELL_PROFILE=""
-    if [[ -n "$ZSH_VERSION" ]]; then
-        SHELL_PROFILE="$HOME/.zshrc"
-    elif [[ -n "$BASH_VERSION" ]]; then
-        SHELL_PROFILE="$HOME/.bashrc"
+    if [[ -d "$HOME/.oh-my-zsh" ]]; then
+        log_info "oh-my-zsh already installed"
+        return
     fi
     
-    if [[ -n "$SHELL_PROFILE" && -f "$SHELL_PROFILE" ]]; then
-        # Add auto-install hook for .tool-versions
-        if ! grep -q "auto_asdf_install" "$SHELL_PROFILE"; then
+    # Install oh-my-zsh
+    RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+    
+    log_success "oh-my-zsh installed successfully"
+}
+
+# Set zsh as default shell
+set_default_shell() {
+    log_info "Setting zsh as default shell..."
+    
+    # Check if zsh is available
+    if ! command_exists zsh; then
+        log_error "zsh not found, please install it first"
+        return 1
+    fi
+    
+    # Get current shell
+    current_shell=$(getent passwd "$USER" | cut -d: -f7)
+    zsh_path=$(which zsh)
+    
+    if [[ "$current_shell" == "$zsh_path" ]]; then
+        log_info "zsh is already the default shell"
+        return
+    fi
+    
+    # Change default shell
+    if chsh -s "$zsh_path"; then
+        log_success "Default shell changed to zsh"
+        log_info "Please log out and log back in for the change to take effect"
+    else
+        log_warning "Failed to change default shell. You may need to run 'chsh -s $(which zsh)' manually"
+    fi
+}
+
+# Configure shell for optimal asdf performance and tab completions
+configure_shell() {
+    log_info "Configuring shell for optimal asdf performance and tab completions..."
+    
+    # Configure zsh
+    if [[ -f "$HOME/.zshrc" ]]; then
+        SHELL_PROFILE="$HOME/.zshrc"
+        
+        # Add asdf and tool configurations
+        if ! grep -q "asdf completions" "$SHELL_PROFILE"; then
             cat >> "$SHELL_PROFILE" << 'EOF'
+
+# asdf configuration
+. "$HOME/.asdf/asdf.sh"
+fpath=(${ASDF_DIR}/completions $fpath)
+autoload -Uz compinit && compinit
 
 # Auto-install asdf tools when entering directory with .tool-versions
 auto_asdf_install() {
@@ -447,8 +488,96 @@ cd() {
     builtin cd "$@"
     auto_asdf_install
 }
+
+# Tab completions for installed tools
+if command -v gh &> /dev/null; then
+    eval "$(gh completion -s zsh)"
+fi
+
+if command -v kubectl &> /dev/null; then
+    source <(kubectl completion zsh)
+fi
+
+if command -v helm &> /dev/null; then
+    source <(helm completion zsh)
+fi
+
+if command -v terraform &> /dev/null; then
+    complete -o nospace -C terraform terraform
+fi
+
+if command -v docker &> /dev/null; then
+    if [[ -f /usr/share/zsh/vendor-completions/_docker ]]; then
+        source /usr/share/zsh/vendor-completions/_docker
+    fi
+fi
+
+if command -v docker-compose &> /dev/null; then
+    if [[ -f /usr/share/zsh/vendor-completions/_docker-compose ]]; then
+        source /usr/share/zsh/vendor-completions/_docker-compose
+    fi
+fi
+
+# fzf key bindings and completion
+if command -v fzf &> /dev/null; then
+    eval "$(fzf --zsh)"
+fi
+
+# Initialize completion system
+compinit
 EOF
-            log_info "Added auto-install hook to $SHELL_PROFILE"
+            log_info "Added asdf and completions configuration to $SHELL_PROFILE"
+        fi
+    fi
+    
+    # Configure bash as fallback
+    if [[ -f "$HOME/.bashrc" ]]; then
+        BASH_PROFILE="$HOME/.bashrc"
+        
+        if ! grep -q "asdf completions" "$BASH_PROFILE"; then
+            cat >> "$BASH_PROFILE" << 'EOF'
+
+# asdf configuration
+. "$HOME/.asdf/asdf.sh"
+. "$HOME/.asdf/completions/asdf.bash"
+
+# Auto-install asdf tools when entering directory with .tool-versions
+auto_asdf_install() {
+    if [ -f ".tool-versions" ] && [ -d ".git" ]; then
+        echo "🔧 Installing tools from .tool-versions..."
+        asdf install
+    fi
+}
+
+# Hook into directory changes
+cd() {
+    builtin cd "$@"
+    auto_asdf_install
+}
+
+# Tab completions for installed tools
+if command -v gh &> /dev/null; then
+    eval "$(gh completion -s bash)"
+fi
+
+if command -v kubectl &> /dev/null; then
+    source <(kubectl completion bash)
+fi
+
+if command -v helm &> /dev/null; then
+    source <(helm completion bash)
+fi
+
+if command -v terraform &> /dev/null; then
+    complete -C terraform terraform
+fi
+
+# fzf key bindings and completion
+if command -v fzf &> /dev/null; then
+    eval "$(fzf --bash)"
+fi
+EOF
+            log_info "Added asdf and completions configuration to $BASH_PROFILE"
         fi
     fi
     
@@ -497,11 +626,13 @@ main() {
     download_config_files
     update_system
     install_essentials
-    install_asdf
-    install_asdf_tools
     install_homebrew
     install_system_tools
+    install_asdf
+    install_asdf_tools
     install_additional_packages
+    install_ohmyzsh
+    set_default_shell
     configure_shell
     validate_installation
     

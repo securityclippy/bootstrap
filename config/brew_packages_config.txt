@@ -15,6 +15,7 @@ fzf
 neovim
 tmux
 zsh
+zellij
 
 # Additional useful tools
 curl
