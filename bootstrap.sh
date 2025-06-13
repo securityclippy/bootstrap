@@ -414,46 +414,9 @@ install_additional_packages() {
     log_success "Additional system packages installed"
 }
 
-# Configure Git (if not already configured)
-configure_git() {
-    if [[ -n "$(git config --global user.name)" && -n "$(git config --global user.email)" ]]; then
-        log_info "Git already configured"
-        return
-    fi
-    
-    log_info "Git configuration needed"
-    echo "Please enter your Git configuration:"
-    read -p "Git username: " git_username
-    read -p "Git email: " git_email
-    
-    git config --global user.name "$git_username"
-    git config --global user.email "$git_email"
-    git config --global init.defaultBranch main
-    git config --global pull.rebase false
-    
-    log_success "Git configured"
-}
 
 # Create common development directories
-create_dev_directories() {
-    log_info "Creating development directories..."
-    
-    DIRECTORIES=(
-        "$HOME/dev"
-        "$HOME/dev/projects"
-        "$HOME/dev/sandbox"
-        "$HOME/.config"
-    )
-    
-    for dir in "${DIRECTORIES[@]}"; do
-        if [[ ! -d "$dir" ]]; then
-            mkdir -p "$dir"
-            log_info "Created directory: $dir"
-        fi
-    done
-    
-    log_success "Development directories created"
-}
+
 
 # Configure shell for optimal asdf performance
 configure_shell() {
