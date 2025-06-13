@@ -349,8 +349,7 @@ install_system_tools() {
             "gh"              # GitHub CLI
             "tree"            # Directory tree viewer
             "htop"            # Process viewer
-            "bat"             # Better cat
-            "exa"             # Better ls
+            "bat"             # Better c
             "fd"              # Better find
             "ripgrep"         # Better grep
             "fzf"             # Fuzzy finder
