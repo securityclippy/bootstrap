@@ -9,7 +9,6 @@ jq
 tree
 htop
 bat
-exa
 fd
 ripgrep
 fzf
