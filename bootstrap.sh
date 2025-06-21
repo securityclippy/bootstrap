@@ -4,7 +4,11 @@
 # This script is idempotent - safe to run multiple times
 # Usage: curl -fsSL https://raw.githubusercontent.com/securityclippy/bootstrap/main/bootstrap.sh | bash
 
-set -e  # Exit on any error
+# Note: Removed 'set -e' to allow script to continue on individual tool failures
+
+# Arrays to track installation results
+SUCCEEDED_STEPS=()
+FAILED_STEPS=()
 
 # Colors for output
 RED='\033[0;31m'
@@ -30,6 +34,18 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
+# Function to record successful step
+record_success() {
+    SUCCEEDED_STEPS+=("$1")
+    log_success "$1"
+}
+
+# Function to record failed step
+record_failure() {
+    FAILED_STEPS+=("$1")
+    log_error "$1"
+}
+
 # Check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -38,8 +54,8 @@ command_exists() {
 # Check if we're on a supported Linux distribution
 check_linux_distro() {
     if [[ "$OSTYPE" != "linux-gnu"* ]]; then
-        log_error "This script is designed for Linux systems only"
-        exit 1
+        record_failure "This script is designed for Linux systems only"
+        return 1
     fi
     
     # Detect distribution
@@ -56,11 +72,11 @@ check_linux_distro() {
         DISTRO="arch"
         PKG_MANAGER="pacman"
     else
-        log_error "Unsupported Linux distribution"
-        exit 1
+        record_failure "Unsupported Linux distribution"
+        return 1
     fi
     
-    log_info "Detected Linux distribution: $DISTRO"
+    record_success "Detected Linux distribution: $DISTRO"
 }
 
 # Update system packages
@@ -69,29 +85,43 @@ update_system() {
     
     case $PKG_MANAGER in
         apt-get)
-            sudo apt-get update -y
+            if sudo apt-get update -y; then
+                record_success "System packages updated"
+            else
+                record_failure "Failed to update system packages"
+                return 1
+            fi
             ;;
         yum|dnf)
-            sudo $PKG_MANAGER update -y
+            if sudo $PKG_MANAGER update -y; then
+                record_success "System packages updated"
+            else
+                record_failure "Failed to update system packages"
+                return 1
+            fi
             ;;
         pacman)
-            sudo pacman -Sy
+            if sudo pacman -Sy; then
+                record_success "System packages updated"
+            else
+                record_failure "Failed to update system packages"
+                return 1
+            fi
             ;;
     esac
-    
-    log_success "System packages updated"
 }
 
-# Install essential packages including asdf dependencies
+# Install essential packages including asdf dependencies and zsh
 install_essentials() {
-    log_info "Installing essential packages and asdf dependencies..."
+    log_info "Installing essential packages, asdf dependencies, and zsh..."
     
     case $PKG_MANAGER in
         apt-get)
-            sudo apt-get install -y \
+            if sudo apt-get install -y \
                 curl \
                 wget \
                 git \
+                zsh \
                 build-essential \
                 file \
                 procps \
@@ -110,13 +140,19 @@ install_essentials() {
                 libgdbm-dev \
                 libsqlite3-dev \
                 libgmp-dev \
-                pkg-config
+                pkg-config; then
+                record_success "Essential packages, asdf dependencies, and zsh installed"
+            else
+                record_failure "Failed to install essential packages"
+                return 1
+            fi
             ;;
         yum|dnf)
-            sudo $PKG_MANAGER install -y \
+            if sudo $PKG_MANAGER install -y \
                 curl \
                 wget \
                 git \
+                zsh \
                 gcc \
                 gcc-c++ \
                 make \
@@ -135,16 +171,22 @@ install_essentials() {
                 gdbm-devel \
                 sqlite-devel \
                 gmp-devel \
-                pkgconfig
+                pkgconfig; then
+                record_success "Essential packages, asdf dependencies, and zsh installed"
+            else
+                record_failure "Failed to install essential packages"
+                return 1
+            fi
             ;;
         pacman)
-            sudo pacman -S --needed --noconfirm \
+            if sudo pacman -S --needed --noconfirm \
                 curl \
                 wget \
                 git \
+                zsh \
                 base-devel \
                 file \
-                procps-ng \
+                procfs-ng \
                 ca-certificates \
                 gnupg \
                 autoconf \
@@ -158,11 +200,37 @@ install_essentials() {
                 gdbm \
                 sqlite \
                 gmp \
-                pkgconfig
+                pkgconfig; then
+                record_success "Essential packages, asdf dependencies, and zsh installed"
+            else
+                record_failure "Failed to install essential packages"
+                return 1
+            fi
             ;;
     esac
+}
+
+# Switch to zsh early in the process
+switch_to_zsh() {
+    log_info "Switching to zsh for the remainder of the bootstrap process..."
     
-    log_success "Essential packages and asdf dependencies installed"
+    if ! command_exists zsh; then
+        log_error "zsh not found, cannot switch shells"
+        record_failure "zsh not available for shell switch"
+        return 1
+    fi
+    
+    # Export that we're now running in zsh context
+    export BOOTSTRAP_SHELL="zsh"
+    
+    # Set zsh as the shell for the rest of the script
+    if [[ "$0" != *"zsh"* ]]; then
+        log_info "Re-executing script with zsh..."
+        # Re-execute the script with zsh, passing all current environment
+        exec zsh "$0" "$@"
+    fi
+    
+    record_success "Successfully switched to zsh"
 }
 
 # Download configuration files
@@ -192,13 +260,18 @@ download_config_files() {
             log_warning "Failed to download $config_file, will use defaults if available"
         fi
     done
+    
+    record_success "Configuration files download process completed"
 }
 
 # Install asdf
 install_asdf() {
-    brew install asdf
-    
-    log_success "asdf installed successfully"
+    if brew install asdf; then
+        record_success "asdf installed successfully"
+    else
+        record_failure "Failed to install asdf"
+        return 1
+    fi
 }
 
 # Install asdf plugins and tools from .tool-versions
@@ -264,6 +337,7 @@ EOF
     done < "$tool_versions_file"
     
     # Install plugins for all tools
+    local failed_plugins=()
     for tool in "${tools[@]}"; do
         if ! asdf plugin list | grep -q "^$tool$"; then
             log_info "Adding asdf plugin: $tool"
@@ -271,6 +345,7 @@ EOF
                 log_success "Added plugin: $tool"
             else
                 log_warning "Failed to add plugin: $tool (may not exist)"
+                failed_plugins+=("$tool")
             fi
         else
             log_info "Plugin $tool already installed"
@@ -299,60 +374,76 @@ EOF
             # Install from converted file
             cd /tmp
             if asdf install; then
-                log_success "All tools installed successfully"
+                record_success "All asdf tools installed successfully"
             else
-                log_warning "Some tools failed to install, continuing..."
+                record_failure "Some asdf tools failed to install"
             fi
             rm -f "$temp_tool_versions"
         else
             # Use file as-is
             cd "$(dirname "$tool_versions_file")"
             if asdf install; then
-                log_success "All tools installed successfully"
+                record_success "All asdf tools installed successfully"
             else
-                log_warning "Some tools failed to install, continuing..."
+                record_failure "Some asdf tools failed to install"
             fi
         fi
     fi
     
-    log_success "asdf tools installation completed"
+    if [[ ${#failed_plugins[@]} -gt 0 ]]; then
+        record_failure "Failed to install asdf plugins: ${failed_plugins[*]}"
+    fi
+    
+    log_info "asdf tools installation process completed"
 }
 
 # Install Homebrew (for system tools only)
 install_homebrew() {
     if command_exists brew; then
         log_info "Homebrew already installed, updating..."
-        brew update
-        log_success "Homebrew updated"
+        if brew update; then
+            record_success "Homebrew updated"
+        else
+            record_failure "Failed to update Homebrew"
+            return 1
+        fi
         return
     fi
     
     log_info "Installing Homebrew for system tools..."
     
     # Install Homebrew
-    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-    
-    # Add Homebrew to PATH for current session
-    if [[ -d "/home/linuxbrew/.linuxbrew" ]]; then
-        eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-    fi
-    
-    # Add to shell profile
-    SHELL_PROFILE=""
-    if [[ -n "$ZSH_VERSION" ]]; then
-        SHELL_PROFILE="$HOME/.zshrc"
-    elif [[ -n "$BASH_VERSION" ]]; then
-        SHELL_PROFILE="$HOME/.bashrc"
-    fi
-    
-    if [[ -n "$SHELL_PROFILE" && -f "$SHELL_PROFILE" ]]; then
-        if ! grep -q "linuxbrew" "$SHELL_PROFILE"; then
-            echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> "$SHELL_PROFILE"
-            log_info "Added Homebrew to $SHELL_PROFILE"
+    if NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"; then
+        # Add Homebrew to PATH for current session
+        if [[ -d "/home/linuxbrew/.linuxbrew" ]]; then
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
         fi
+        
+        # Add to shell profile
+        SHELL_PROFILE=""
+        if [[ -n "$ZSH_VERSION" || "$BOOTSTRAP_SHELL" == "zsh" ]]; then
+            SHELL_PROFILE="$HOME/.zshrc"
+            # Ensure .zshrc exists
+            if [[ ! -f "$SHELL_PROFILE" ]]; then
+                touch "$SHELL_PROFILE"
+                log_info "Created $SHELL_PROFILE"
+            fi
+        elif [[ -n "$BASH_VERSION" ]]; then
+            SHELL_PROFILE="$HOME/.bashrc"
+        fi
+        
+        if [[ -n "$SHELL_PROFILE" && -f "$SHELL_PROFILE" ]]; then
+            if ! grep -q "linuxbrew" "$SHELL_PROFILE"; then
+                echo 'eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"' >> "$SHELL_PROFILE"
+                log_info "Added Homebrew to $SHELL_PROFILE"
+            fi
+        fi
+        
+        record_success "Homebrew installed successfully"
+    else
+        record_failure "Failed to install Homebrew"
+        return 1
     fi
-    
-    log_success "Homebrew installed successfully"
 }
 
 # Install system tools via Homebrew (tools that don't need version management)
@@ -399,23 +490,32 @@ install_system_tools() {
             "fzf"             # Fuzzy finder
             "neovim"          # Text editor
             "tmux"            # Terminal multiplexer
-            "zsh"             # Shell
             "git-lfs"         # Git Large File Storage
             "lazygit"         # Git TUI
             "docker-compose"  # Container orchestration
         )
     fi
     
+    local failed_packages=()
     for package in "${packages[@]}"; do
         if brew list "$package" &>/dev/null; then
             log_info "$package already installed"
         else
             log_info "Installing $package..."
-            brew install "$package"
+            if brew install "$package"; then
+                log_success "Installed $package"
+            else
+                log_error "Failed to install $package"
+                failed_packages+=("$package")
+            fi
         fi
     done
     
-    log_success "System tools installed"
+    if [[ ${#failed_packages[@]} -eq 0 ]]; then
+        record_success "All system tools installed successfully"
+    else
+        record_failure "Failed to install system tools: ${failed_packages[*]}"
+    fi
 }
 
 # Install additional system packages from additional-packages.txt
@@ -450,17 +550,27 @@ install_additional_packages() {
     
     case $PKG_MANAGER in
         apt-get)
-            sudo apt-get install -y "${packages[@]}"
+            if sudo apt-get install -y "${packages[@]}"; then
+                record_success "Additional system packages installed"
+            else
+                record_failure "Failed to install additional system packages"
+            fi
             ;;
         yum|dnf)
-            sudo $PKG_MANAGER install -y "${packages[@]}"
+            if sudo $PKG_MANAGER install -y "${packages[@]}"; then
+                record_success "Additional system packages installed"
+            else
+                record_failure "Failed to install additional system packages"
+            fi
             ;;
         pacman)
-            sudo pacman -S --needed --noconfirm "${packages[@]}"
+            if sudo pacman -S --needed --noconfirm "${packages[@]}"; then
+                record_success "Additional system packages installed"
+            else
+                record_failure "Failed to install additional system packages"
+            fi
             ;;
     esac
-    
-    log_success "Additional system packages installed"
 }
 
 
@@ -470,13 +580,22 @@ install_ohmyzsh() {
     
     if [[ -d "$HOME/.oh-my-zsh" ]]; then
         log_info "oh-my-zsh already installed"
+        record_success "oh-my-zsh already installed"
         return
     fi
     
-    # Install oh-my-zsh
-    RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+    # Ensure .zshrc exists before installing oh-my-zsh
+    if [[ ! -f "$HOME/.zshrc" ]]; then
+        touch "$HOME/.zshrc"
+        log_info "Created initial .zshrc file"
+    fi
     
-    log_success "oh-my-zsh installed successfully"
+    # Install oh-my-zsh
+    if RUNZSH=no CHSH=no sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"; then
+        record_success "oh-my-zsh installed successfully"
+    else
+        record_failure "Failed to install oh-my-zsh"
+    fi
 }
 
 # Set zsh as default shell
@@ -500,10 +619,11 @@ set_default_shell() {
     
     # Change default shell
     if chsh -s "$zsh_path"; then
-        log_success "Default shell changed to zsh"
+        record_success "Default shell changed to zsh"
         log_info "Please log out and log back in for the change to take effect"
     else
-        log_warning "Failed to change default shell. You may need to run 'chsh -s $(which zsh)' manually"
+        record_failure "Failed to change default shell to zsh"
+        log_warning "You may need to run 'chsh -s $(which zsh)' manually"
     fi
 }
 
@@ -511,7 +631,12 @@ set_default_shell() {
 configure_shell() {
     log_info "Configuring shell for optimal asdf performance and tab completions..."
     
-    # Configure zsh
+    # Configure zsh - ensure .zshrc exists first
+    if [[ ! -f "$HOME/.zshrc" ]]; then
+        touch "$HOME/.zshrc"
+        log_info "Created .zshrc file for configuration"
+    fi
+    
     if [[ -f "$HOME/.zshrc" ]]; then
         SHELL_PROFILE="$HOME/.zshrc"
         
@@ -575,7 +700,7 @@ fi
 # Initialize completion system
 compinit
 EOF
-            log_info "Added asdf and completions configuration to $SHELL_PROFILE"
+            record_success "Added asdf and completions configuration to zsh"
         fi
     fi
     
@@ -626,11 +751,47 @@ if command -v fzf &> /dev/null; then
     eval "$(fzf --bash)"
 fi
 EOF
-            log_info "Added asdf and completions configuration to $BASH_PROFILE"
+            record_success "Added asdf and completions configuration to bash"
         fi
     fi
     
-    log_success "Shell configuration completed"
+    record_success "Shell configuration completed"
+}
+
+# Print installation summary
+print_summary() {
+    log_info ""
+    log_info "========================================="
+    log_info "           INSTALLATION SUMMARY"
+    log_info "========================================="
+    
+    if [[ ${#SUCCEEDED_STEPS[@]} -gt 0 ]]; then
+        log_info ""
+        log_success "✅ SUCCESSFUL STEPS (${#SUCCEEDED_STEPS[@]}):"
+        for step in "${SUCCEEDED_STEPS[@]}"; do
+            echo -e "  ${GREEN}✓${NC} $step"
+        done
+    fi
+    
+    if [[ ${#FAILED_STEPS[@]} -gt 0 ]]; then
+        log_info ""
+        log_error "❌ FAILED STEPS (${#FAILED_STEPS[@]}):"
+        for step in "${FAILED_STEPS[@]}"; do
+            echo -e "  ${RED}✗${NC} $step"
+        done
+        log_info ""
+        log_warning "Some installations failed. You may need to:"
+        log_warning "- Check your internet connection"
+        log_warning "- Verify system dependencies"
+        log_warning "- Run the script again"
+        log_warning "- Install failed components manually"
+    else
+        log_info ""
+        log_success "🎉 All installations completed successfully!"
+    fi
+    
+    log_info ""
+    log_info "========================================="
 }
 
 # Validate installation
@@ -670,38 +831,55 @@ validate_installation() {
 main() {
     log_info "Starting Linux development environment bootstrap..."
     log_info "This script uses asdf for development tools and Homebrew for system utilities"
+    log_info "Script will continue even if individual installations fail"
     
-    check_linux_distro
-    download_config_files
-    update_system
-    install_essentials
-    install_homebrew
-    install_system_tools
-    install_asdf
-    install_asdf_tools
-    install_additional_packages
-    install_ohmyzsh
-    set_default_shell
-    configure_shell
-    validate_installation
+    # Track overall success/failure
+    local overall_success=true
     
-    log_success "Bootstrap completed successfully!"
-    log_info ""
-    log_info "🎉 Your development environment is ready!"
-    log_info ""
-    log_info "Next steps:"
-    log_info "1. Restart your shell or run 'source ~/.bashrc' (or ~/.zshrc)"
-    log_info "2. Navigate to a project directory and run 'asdf current' to see active versions"
-    log_info "3. Create a .tool-versions file in your projects for version consistency"
-    log_info "4. Run this script again anytime to update your environment"
-    log_info ""
-    log_info "Tool versions installed:"
+    check_linux_distro || overall_success=false
+    download_config_files || overall_success=false
+    update_system || overall_success=false
+    install_essentials || overall_success=false
+    switch_to_zsh || overall_success=false
+    install_homebrew || overall_success=false
+    install_system_tools || overall_success=false
+    install_asdf || overall_success=false
+    install_asdf_tools || overall_success=false
+    install_additional_packages || overall_success=false
+    install_ohmyzsh || overall_success=false
+    set_default_shell || overall_success=false
+    configure_shell || overall_success=false
+    validate_installation || overall_success=false
     
-    # Show installed versions if available
-    export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"
-    if [[ -f "$HOME/.asdf/asdf.sh" ]]; then
-        . "$HOME/.asdf/asdf.sh"
-        asdf current 2>/dev/null || echo "  Run 'asdf current' after restarting your shell to see versions"
+    # Print comprehensive summary
+    print_summary
+    
+    if [[ ${#FAILED_STEPS[@]} -eq 0 ]]; then
+        log_success "Bootstrap completed successfully!"
+        log_info ""
+        log_info "🎉 Your development environment is ready!"
+        log_info ""
+        log_info "Next steps:"
+        log_info "1. Restart your shell or run 'source ~/.bashrc' (or ~/.zshrc)"
+        log_info "2. Navigate to a project directory and run 'asdf current' to see active versions"
+        log_info "3. Create a .tool-versions file in your projects for version consistency"
+        log_info "4. Run this script again anytime to update your environment"
+        log_info ""
+        log_info "Tool versions installed:"
+        
+        # Show installed versions if available
+        export PATH="${ASDF_DATA_DIR:-$HOME/.asdf}/shims:$PATH"
+        if [[ -f "$HOME/.asdf/asdf.sh" ]]; then
+            . "$HOME/.asdf/asdf.sh"
+            asdf current 2>/dev/null || echo "  Run 'asdf current' after restarting your shell to see versions"
+        fi
+    else
+        log_warning "Bootstrap completed with ${#FAILED_STEPS[@]} failures"
+        log_info "See the summary above for details on what failed"
+        log_info "You can re-run this script to retry failed installations"
+        
+        # Exit with error code to indicate partial failure
+        exit 1
     fi
 }
 
