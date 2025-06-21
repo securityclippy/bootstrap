@@ -627,6 +627,70 @@ set_default_shell() {
     fi
 }
 
+# Configure tmux to use default shell
+configure_tmux() {
+    log_info "Configuring tmux to use default shell..."
+    
+    # Create tmux configuration file
+    local tmux_config="$HOME/.tmux.conf"
+    
+    if [[ ! -f "$tmux_config" ]]; then
+        log_info "Creating tmux configuration file..."
+        cat > "$tmux_config" << 'EOF'
+# Use default shell
+set-option -g default-shell $SHELL
+
+# Enable mouse support
+set -g mouse on
+
+# Set prefix key to Ctrl-a (more ergonomic than Ctrl-b)
+unbind C-b
+set -g prefix C-a
+bind C-a send-prefix
+
+# Reload config file
+bind r source-file ~/.tmux.conf \; display-message "Config reloaded!"
+
+# Better window splitting
+bind | split-window -h
+bind - split-window -v
+
+# Vi-style pane navigation
+bind h select-pane -L
+bind j select-pane -D
+bind k select-pane -U
+bind l select-pane -R
+
+# Start window and pane numbering at 1
+set -g base-index 1
+set -g pane-base-index 1
+
+# Automatically renumber windows
+set -g renumber-windows on
+
+# Increase history limit
+set -g history-limit 10000
+
+# Enable true color support
+set -g default-terminal "screen-256color"
+set -ag terminal-overrides ",xterm-256color:RGB"
+EOF
+        record_success "Created tmux configuration with default shell"
+    else
+        # Check if default-shell is already configured
+        if ! grep -q "default-shell" "$tmux_config"; then
+            log_info "Adding default shell configuration to existing tmux config..."
+            echo "" >> "$tmux_config"
+            echo "# Use default shell" >> "$tmux_config"
+            echo "set-option -g default-shell \$SHELL" >> "$tmux_config"
+            record_success "Added default shell configuration to tmux"
+        else
+            log_info "tmux already configured with default shell"
+            record_success "tmux default shell configuration already present"
+        fi
+    fi
+}
+
 # Configure shell for optimal asdf performance and tab completions
 configure_shell() {
     log_info "Configuring shell for optimal asdf performance and tab completions..."
@@ -754,6 +818,9 @@ EOF
             record_success "Added asdf and completions configuration to bash"
         fi
     fi
+    
+    # Configure tmux to use default shell
+    configure_tmux
     
     record_success "Shell configuration completed"
 }
